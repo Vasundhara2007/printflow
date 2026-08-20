@@ -24,7 +24,6 @@ MERCHANT_UPI = "omkar.chaudhari7087@okhdfcbank"
 MERCHANT_NAME = "Campus PrintFlow"
 KIOSK_NAME = "Campus Express Print"
 
-# इन-मेमरी जॉब बफर (Vercel Serverless Buffer)
 GLOBAL_JOBS = []
 token_counter = 1
 
@@ -98,7 +97,6 @@ def apply_nup_and_stamp(pdf_bytes, nup_mode, doc_type, token_str, student_name, 
                         new_page.merge_page(p)
                 writer.add_page(new_page)
 
-        # Apply Stamp only if NOT Confidential
         if doc_type != 'confidential' and len(writer.pages) > 0:
             first_p = writer.pages[0]
             pw = float(first_p.mediabox.width)
@@ -129,7 +127,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PrintFlow - Kiosk (Vercel Edition)</title>
+    <title>PrintFlow - Kiosk</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -191,7 +189,7 @@ HTML_TEMPLATE = """
         <div id="screen-0" class="screen active">
             <div style="text-align: center;">
                 <div class="login-logo">🎓</div>
-                <h2 style="font-size: 18px; font-weight: 800;">Student Access (Vercel)</h2>
+                <h2 style="font-size: 18px; font-weight: 800;">Student Quick Access</h2>
                 <p style="font-size: 12px; color: #64748b; margin-top: 4px;">Enter details to stamp on your assignments</p>
                 <div style="margin-top: 18px;">
                     <div class="input-group">
@@ -321,9 +319,10 @@ HTML_TEMPLATE = """
         <div id="screen-4" class="screen">
             <div>
                 <button onclick="go(1)" style="border:none;background:none;font-size:18px;cursor:pointer;">← Back</button>
+                <h3 style="font-size: 16px; font-weight: 800; margin: 12px 0;">📜 Print History</h3>
                 <div id="histList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"></div>
             </div>
-            <button class="btn-amazon" onclick="go(1)">Back</button>
+            <button class="btn-amazon" onclick="go(1)">Back to Kiosk ❯</button>
         </div>
     </div>
 
@@ -462,6 +461,19 @@ HTML_TEMPLATE = """
             .then(res => res.json())
             .then(d => {
                 if(d.status === 'success') {
+                    let hist = [];
+                    try { hist = JSON.parse(localStorage.getItem('pflow_history')) || []; } catch(e){}
+                    const now = new Date();
+                    hist.unshift({
+                        token: d.token,
+                        filename: fileName,
+                        date: now.toLocaleDateString() + ' ' + now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                        pages: Math.ceil(pages/nup),
+                        copies: copies,
+                        cost: total.toFixed(2)
+                    });
+                    localStorage.setItem('pflow_history', JSON.stringify(hist));
+
                     document.getElementById('tokDisp').innerText = d.token;
                     go(3);
                 } else {
@@ -473,6 +485,40 @@ HTML_TEMPLATE = """
                 alert("Network error");
                 b.disabled = false;
             });
+        }
+
+        function openHistoryScreen() {
+            const listEl = document.getElementById('histList');
+            let hist = [];
+            try {
+                hist = JSON.parse(localStorage.getItem('pflow_history')) || [];
+            } catch(e) {
+                hist = [];
+            }
+            
+            if(!hist || hist.length === 0) {
+                listEl.innerHTML = `
+                    <div style="text-align: center; color: #64748b; padding: 40px 10px; font-size: 13px; background: #f8fafc; border-radius: 12px; border: 1.5px dashed #cbd5e1;">
+                        <div style="font-size: 28px; margin-bottom: 8px;">📑</div>
+                        <strong>No print history yet.</strong>
+                        <p style="font-size: 11px; margin-top: 4px; color: #94a3b8;">Prints you submit will appear here automatically.</p>
+                    </div>`;
+            } else {
+                listEl.innerHTML = hist.map(h => `
+                    <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <span style="background: #e6f4f1; color: #004d40; font-weight: 800; font-size: 11px; padding: 2px 8px; border-radius: 4px;">Token ${h.token || 'A-01'}</span>
+                            <span style="font-size: 11px; color: #64748b;">${h.date || 'Today'}</span>
+                        </div>
+                        <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📄 ${h.filename || 'Document'}</div>
+                        <div style="font-size: 11px; color: #64748b; display: flex; justify-content: space-between; border-top: 1px dashed #e2e8f0; padding-top: 6px; margin-top: 4px;">
+                            <span>${h.pages || 1} Sheets • ${h.copies || 1} Copy</span>
+                            <span style="font-weight: 800; color: #004d40; font-size: 12px;">₹${h.cost || '2.00'}</span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            go(4);
         }
     </script>
 </body>
