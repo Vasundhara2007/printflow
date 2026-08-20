@@ -20,7 +20,7 @@ app = Flask(__name__)
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
-MERCHANT_UPI = "yourupi@okaxis"
+MERCHANT_UPI = "omkar.chaudhari7087@okhdfcbank"
 MERCHANT_NAME = "Campus PrintFlow"
 KIOSK_NAME = "Campus Express Print"
 
