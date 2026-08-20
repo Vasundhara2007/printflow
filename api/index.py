@@ -1,19 +1,12 @@
 import os
 import sys
 import io
-import math
-import tempfile
 import base64
 import time
-from flask import Flask, request, jsonify, render_template_string, Response
+from flask import Flask, request, jsonify, render_template_string
 from PIL import Image
 from pypdf import PdfReader, PdfWriter, PageObject, Transformation
 from reportlab.pdfgen import canvas
-
-try:
-    from pptx import Presentation
-except ImportError:
-    Presentation = None
 
 app = Flask(__name__)
 
@@ -29,14 +22,12 @@ token_counter = 1
 
 def convert_to_pdf_bytes(file_bytes, filename):
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    
     if ext == 'pdf':
         try:
             reader = PdfReader(io.BytesIO(file_bytes))
             return file_bytes, len(reader.pages)
         except Exception:
             return file_bytes, 1
-
     elif ext in ['jpg', 'jpeg', 'png', 'bmp', 'webp']:
         try:
             img = Image.open(io.BytesIO(file_bytes))
@@ -47,7 +38,6 @@ def convert_to_pdf_bytes(file_bytes, filename):
             return out_io.getvalue(), 1
         except Exception:
             return file_bytes, 1
-
     return file_bytes, 1
 
 def apply_nup_and_stamp(pdf_bytes, nup_mode, doc_type, token_str, student_name, roll_no):
@@ -55,7 +45,6 @@ def apply_nup_and_stamp(pdf_bytes, nup_mode, doc_type, token_str, student_name, 
         reader = PdfReader(io.BytesIO(pdf_bytes))
         total_pages = len(reader.pages)
         a4_w, a4_h = 595.28, 841.89
-
         writer = PdfWriter()
 
         if nup_mode == 1:
@@ -117,8 +106,7 @@ def apply_nup_and_stamp(pdf_bytes, nup_mode, doc_type, token_str, student_name, 
         out_stream = io.BytesIO()
         writer.write(out_stream)
         return out_stream.getvalue()
-    except Exception as e:
-        print(f"Error processing layout: {e}")
+    except Exception:
         return pdf_bytes
 
 HTML_TEMPLATE = """
@@ -189,7 +177,7 @@ HTML_TEMPLATE = """
         <div id="screen-0" class="screen active">
             <div style="text-align: center;">
                 <div class="login-logo">🎓</div>
-                <h2 style="font-size: 18px; font-weight: 800;">Student Quick Access</h2>
+                <h2 style="font-size: 18px; font-weight: 800;">Student Access</h2>
                 <p style="font-size: 12px; color: #64748b; margin-top: 4px;">Enter details to stamp on your assignments</p>
                 <div style="margin-top: 18px;">
                     <div class="input-group">
@@ -306,7 +294,7 @@ HTML_TEMPLATE = """
                 <div class="tracker-box">
                     <div style="font-size: 12px; opacity: 0.9;">Assigned Token</div>
                     <div class="token-num" id="tokDisp">A-01</div>
-                    <div style="font-size: 12px; color: #a7f3d0;">✓ Sent to Local Printer via Vercel!</div>
+                    <div style="font-size: 12px; color: #a7f3d0;">✓ Sent to Local Printer!</div>
                 </div>
                 <p style="text-align: center; color: #64748b; font-size: 12px; margin-top: 14px;">
                     Collect your physical pages from the printer tray.
@@ -423,7 +411,7 @@ HTML_TEMPLATE = """
 
         function goPayment() {
             document.getElementById('qrTotal').innerText = '₹' + total.toFixed(2);
-            const upi = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${total}&cu=INR&tn=PrintFlow_Vercel`;
+            const upi = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${total}&cu=INR&tn=PrintFlow`;
             document.getElementById('genericUpiBtn').href = upi;
             const q = document.getElementById('qrcode');
             q.innerHTML = "";
@@ -432,34 +420,33 @@ HTML_TEMPLATE = """
         }
 
         function paidDone() {
-            setTimeout(() => {
-                const b = document.getElementById('btnConfirm');
-                b.removeAttribute('disabled');
-                b.innerText = "✅ Paid • Send to Printer";
-                b.style.background = "#004d40";
-            }, 1000);
+            const b = document.getElementById('btnConfirm');
+            b.removeAttribute('disabled');
+            b.innerText = "✅ Paid • Send to Printer";
+            b.style.background = "#004d40";
         }
 
-        function submitPrint() {
+        async function submitPrint() {
             const b = document.getElementById('btnConfirm');
             b.disabled = true;
             b.innerText = "⏳ Routing via Vercel...";
 
-            fetch('/api/enqueue', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    file_base64: fileRawBase64,
-                    filename: fileName,
-                    doc_type: selectedDocType,
-                    nup: nup,
-                    copies: copies,
-                    student_name: currentStudent ? currentStudent.name : '',
-                    roll_no: currentStudent ? currentStudent.roll : ''
-                })
-            })
-            .then(res => res.json())
-            .then(d => {
+            try {
+                const response = await fetch('/api/enqueue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file_base64: fileRawBase64,
+                        filename: fileName,
+                        doc_type: selectedDocType,
+                        nup: nup,
+                        copies: copies,
+                        student_name: currentStudent ? currentStudent.name : '',
+                        roll_no: currentStudent ? currentStudent.roll : ''
+                    })
+                });
+
+                const d = await response.json();
                 if(d.status === 'success') {
                     let hist = [];
                     try { hist = JSON.parse(localStorage.getItem('pflow_history')) || []; } catch(e){}
@@ -477,14 +464,15 @@ HTML_TEMPLATE = """
                     document.getElementById('tokDisp').innerText = d.token;
                     go(3);
                 } else {
-                    alert("Error: " + d.message);
+                    alert("Error: " + (d.message || "Failed"));
                     b.disabled = false;
+                    b.innerText = "🔒 Complete Payment to Print";
                 }
-            })
-            .catch(e => {
-                alert("Network error");
+            } catch (err) {
+                alert("Network error: " + err.message);
                 b.disabled = false;
-            });
+                b.innerText = "🔒 Complete Payment to Print";
+            }
         }
 
         function openHistoryScreen() {
@@ -492,16 +480,13 @@ HTML_TEMPLATE = """
             let hist = [];
             try {
                 hist = JSON.parse(localStorage.getItem('pflow_history')) || [];
-            } catch(e) {
-                hist = [];
-            }
+            } catch(e) { hist = []; }
             
             if(!hist || hist.length === 0) {
                 listEl.innerHTML = `
                     <div style="text-align: center; color: #64748b; padding: 40px 10px; font-size: 13px; background: #f8fafc; border-radius: 12px; border: 1.5px dashed #cbd5e1;">
                         <div style="font-size: 28px; margin-bottom: 8px;">📑</div>
                         <strong>No print history yet.</strong>
-                        <p style="font-size: 11px; margin-top: 4px; color: #94a3b8;">Prints you submit will appear here automatically.</p>
                     </div>`;
             } else {
                 listEl.innerHTML = hist.map(h => `
@@ -535,6 +520,9 @@ def enqueue():
     try:
         data = request.json or {}
         raw_b64 = data.get('file_base64')
+        if not raw_b64:
+            return jsonify({'status': 'error', 'message': 'No file received'}), 400
+
         filename = data.get('filename', 'doc.pdf')
         doc_type = data.get('doc_type', 'assignment')
         nup = int(data.get('nup', 1))
@@ -542,12 +530,12 @@ def enqueue():
         student_name = data.get('student_name', '')
         roll_no = data.get('roll_no', '')
 
-        file_bytes = base64.b64decode(raw_b64)
-        pdf_bytes, pages = convert_to_pdf_bytes(file_bytes, filename)
-        final_pdf_bytes = apply_nup_and_stamp(pdf_bytes, nup, doc_type, f"A-{token_counter:02d}", student_name, roll_no)
-
         token = f"A-{token_counter:02d}"
         token_counter += 1
+
+        file_bytes = base64.b64decode(raw_b64)
+        pdf_bytes, pages = convert_to_pdf_bytes(file_bytes, filename)
+        final_pdf_bytes = apply_nup_and_stamp(pdf_bytes, nup, doc_type, token, student_name, roll_no)
 
         GLOBAL_JOBS.append({
             'token': token,
