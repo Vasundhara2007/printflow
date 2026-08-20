@@ -1,0 +1,6 @@
+Flask
+Pillow
+pypdf
+reportlab
+python-pptx
+requests
