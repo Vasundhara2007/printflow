@@ -9,7 +9,7 @@ import base64
 # ==============================================================================
 # Vercel Deployment ची तुमची लाईव्ह लिंक इथे टाका:
 # ==============================================================================
-VERCEL_URL = "https://your-project-name.vercel.app"  # <-- तुमची Vercel URL
+VERCEL_URL = "https://printflow-opal.vercel.app" # <-- तुमची Vercel URL
 
 print("==================================================")
 print("🚀 PrintFlow Vercel Hardware Bridge चालू आहे...")

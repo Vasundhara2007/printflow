@@ -1,6 +1,7 @@
 import os
 import sys
 import io
+import json
 import base64
 import time
 from flask import Flask, request, jsonify, render_template_string
@@ -13,11 +14,10 @@ app = Flask(__name__)
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
-MERCHANT_UPI = "omkar.chaudhari7087@okhdfcbank"
+MERCHANT_UPI = "nikamvasundhara45@gmail.com"
 MERCHANT_NAME = "Campus PrintFlow"
 KIOSK_NAME = "Campus Express Print"
 
-GLOBAL_JOBS = []
 token_counter = 1
 
 def convert_to_pdf_bytes(file_bytes, filename):
@@ -213,7 +213,7 @@ HTML_TEMPLATE = """
                 <div class="sec-title">2. Choose Document</div>
                 <div class="upload-card" onclick="document.getElementById('fileInp').click()">
                     <div style="font-size: 20px;">📂</div>
-                    <div style="font-size: 12px; font-weight: 800; color: #004d40;" id="upText">Tap to Select File</div>
+                    <div style="font-size: 12px; font-weight: 800; color: #004d40;" id="upText">Tap to Select File (Max 4MB)</div>
                 </div>
                 <input type="file" id="fileInp" accept=".pdf,image/*" onchange="fileSelected(this)" style="display: none;">
 
@@ -288,19 +288,24 @@ HTML_TEMPLATE = """
             <button class="btn-amazon" id="btnConfirm" disabled onclick="submitPrint()">🔒 Complete Payment to Print</button>
         </div>
 
-        <!-- SCREEN 3: TOKEN -->
+        <!-- SCREEN 3: TOKEN & DIRECT PRINT -->
         <div id="screen-3" class="screen">
             <div>
                 <div class="tracker-box">
                     <div style="font-size: 12px; opacity: 0.9;">Assigned Token</div>
                     <div class="token-num" id="tokDisp">A-01</div>
-                    <div style="font-size: 12px; color: #a7f3d0;">✓ Sent to Local Printer!</div>
+                    <div style="font-size: 12px; color: #a7f3d0;">✓ Order Ready to Print!</div>
                 </div>
+                
+                <button class="btn-amazon" style="background:#004d40; color:#fff; margin-top:20px; font-size:16px;" onclick="triggerDirectPrint()">
+                    🖨️ Print Document Now
+                </button>
+                
                 <p style="text-align: center; color: #64748b; font-size: 12px; margin-top: 14px;">
-                    Collect your physical pages from the printer tray.
+                    Tap above to send directly to your connected HP Wireless Printer.
                 </p>
             </div>
-            <button class="btn-amazon" onclick="location.reload()">Print Another 🔄</button>
+            <button class="btn-amazon" onclick="location.reload()" style="background:#64748b; color:#fff;">Print Another 🔄</button>
         </div>
 
         <!-- SCREEN 4: HISTORY -->
@@ -314,12 +319,16 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- Hidden Iframe specifically for Android/Mopria Printing -->
+    <iframe id="printIframe" style="display:none;"></iframe>
+
     <script>
         const UPI_ID = "{{ upi_id }}";
         const MERCHANT_NAME = "{{ merchant_name }}";
         let currentStudent = null;
         let selectedDocType = 'assignment';
         let fileRawBase64 = null;
+        let processedPdfBase64 = null;
         let fileName = "";
         let pages = 1;
         let nup = 1;
@@ -364,17 +373,58 @@ HTML_TEMPLATE = """
         function fileSelected(inp) {
             if(inp.files && inp.files[0]) {
                 const f = inp.files[0];
+                if (f.size > 3.8 * 1024 * 1024 && !f.type.startsWith('image/')) {
+                    alert("⚠️ File size is larger than 3.5MB. Please choose a smaller document.");
+                    inp.value = "";
+                    return;
+                }
+
                 fileName = f.name;
                 document.getElementById('upText').innerText = "Selected: " + f.name;
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    fileRawBase64 = e.target.result.split(',')[1];
-                    document.getElementById('previewContainer').style.display = 'block';
-                    document.getElementById('pdfFrame').src = e.target.result;
-                    document.getElementById('btnPay').removeAttribute('disabled');
-                    calc();
-                };
-                reader.readAsDataURL(f);
+
+                if (f.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = new Image();
+                        img.src = e.target.result;
+                        img.onload = function() {
+                            const canvas = document.createElement('canvas');
+                            let width = img.width;
+                            let height = img.height;
+                            const maxDim = 1600;
+                            if (width > maxDim || height > maxDim) {
+                                if (width > height) {
+                                    height = Math.round((height * maxDim) / width);
+                                    width = maxDim;
+                                } else {
+                                    width = Math.round((width * maxDim) / height);
+                                    height = maxDim;
+                                }
+                            }
+                            canvas.width = width;
+                            canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                            fileRawBase64 = dataUrl.split(',')[1];
+                            document.getElementById('previewContainer').style.display = 'block';
+                            document.getElementById('pdfFrame').src = dataUrl;
+                            document.getElementById('btnPay').removeAttribute('disabled');
+                            calc();
+                        };
+                    };
+                    reader.readAsDataURL(f);
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        fileRawBase64 = e.target.result.split(',')[1];
+                        document.getElementById('previewContainer').style.display = 'block';
+                        document.getElementById('pdfFrame').src = e.target.result;
+                        document.getElementById('btnPay').removeAttribute('disabled');
+                        calc();
+                    };
+                    reader.readAsDataURL(f);
+                }
             }
         }
 
@@ -429,7 +479,7 @@ HTML_TEMPLATE = """
         async function submitPrint() {
             const b = document.getElementById('btnConfirm');
             b.disabled = true;
-            b.innerText = "⏳ Routing via Vercel...";
+            b.innerText = "⏳ Processing stamped PDF...";
 
             try {
                 const response = await fetch('/api/enqueue', {
@@ -446,8 +496,14 @@ HTML_TEMPLATE = """
                     })
                 });
 
+                if (!response.ok) {
+                    throw new Error(`Server responded with ${response.status}`);
+                }
+
                 const d = await response.json();
                 if(d.status === 'success') {
+                    processedPdfBase64 = d.pdf_base64;
+                    
                     let hist = [];
                     try { hist = JSON.parse(localStorage.getItem('pflow_history')) || []; } catch(e){}
                     const now = new Date();
@@ -469,10 +525,34 @@ HTML_TEMPLATE = """
                     b.innerText = "🔒 Complete Payment to Print";
                 }
             } catch (err) {
-                alert("Network error: " + err.message);
+                alert("Upload failed: File is too large or network error.");
                 b.disabled = false;
                 b.innerText = "🔒 Complete Payment to Print";
             }
+        }
+
+        function triggerDirectPrint() {
+            if (!processedPdfBase64) {
+                window.print();
+                return;
+            }
+            const byteCharacters = atob(processedPdfBase64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const blobUrl = URL.createObjectURL(blob);
+
+            const iframe = document.getElementById('printIframe');
+            iframe.src = blobUrl;
+            iframe.onload = function() {
+                setTimeout(() => {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                }, 500);
+            };
         }
 
         function openHistoryScreen() {
@@ -536,32 +616,15 @@ def enqueue():
         file_bytes = base64.b64decode(raw_b64)
         pdf_bytes, pages = convert_to_pdf_bytes(file_bytes, filename)
         final_pdf_bytes = apply_nup_and_stamp(pdf_bytes, nup, doc_type, token, student_name, roll_no)
+        final_b64 = base64.b64encode(final_pdf_bytes).decode('utf-8')
 
-        GLOBAL_JOBS.append({
+        return jsonify({
+            'status': 'success', 
             'token': token,
-            'filename': filename,
-            'pdf_base64': base64.b64encode(final_pdf_bytes).decode('utf-8'),
-            'student_name': student_name,
-            'roll_no': roll_no,
-            'doc_type': doc_type,
-            'copies': copies,
-            'time': time.time()
+            'pdf_base64': final_b64
         })
-
-        return jsonify({'status': 'success', 'token': token})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/get-pending-jobs', methods=['GET'])
-def get_pending_jobs():
-    return jsonify({'jobs': GLOBAL_JOBS})
-
-@app.route('/api/mark-job-done', methods=['POST'])
-def mark_job_done():
-    global GLOBAL_JOBS
-    token = request.json.get('token')
-    GLOBAL_JOBS = [j for j in GLOBAL_JOBS if j.get('token') != token]
-    return jsonify({'status': 'success'})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
